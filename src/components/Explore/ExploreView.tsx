@@ -169,47 +169,38 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showInitialSearch, setShowInitialSearch] = useState(!initialQuery);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [chatHistory, setChatHistory] = useState<Message[][]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const gptService = useMemo(() => new GPTService(), []);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   // Add a ref for the messages container
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // More reliable scroll to top function
-  const scrollToTop = useCallback(() => {
-    // First try window scroll
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    
-    // Also try scrolling container if it exists
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+  const scrollToBottom = useCallback(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-
-    // Fallback with setTimeout to ensure scroll happens after render
-    setTimeout(() => {
-      window.scrollTo({ top: 0, behavior: 'instant' });
-    }, 100);
   }, []);
 
-  // Call scroll on any message change
+  // Scroll to bottom when new messages are added
   useEffect(() => {
-    if (messages.length > 0) {
-      scrollToTop();
-    }
-  }, [messages.length, scrollToTop]);
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
 
   // Add effect to listen for reset
   useEffect(() => {
     const handleReset = () => {
-      setMessages([]);
       setShowInitialSearch(true);
+      setChatHistory([...chatHistory, messages]);
+      setMessages([]);
     };
 
     window.addEventListener('resetExplore', handleReset);
     return () => window.removeEventListener('resetExplore', handleReset);
-  }, []);
+  }, [chatHistory, messages]);
 
   const handleSearch = useCallback(async (query: string) => {
     try {
@@ -218,10 +209,11 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
       }
 
       // Scroll before starting the search
-      scrollToTop();
+      setShowHistory(false);
       
       setIsLoading(true);
-      setMessages([
+      setMessages(prevMessages => [
+        ...prevMessages,
         { type: 'user', content: query },
         { type: 'ai', content: '' }
       ]);
@@ -232,11 +224,11 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
         query,
         userContext,
         (chunk: StreamChunk) => {
-          setMessages([
-            { type: 'user', content: query },
+          setMessages(prevMessages => [
+            ...prevMessages.slice(0, -1),
             {
               type: 'ai',
-              content: chunk.text,
+              content: (prevMessages[prevMessages.length - 1].content || '') + (chunk.text || ''),
               topics: chunk.topics,
               questions: chunk.questions
             }
@@ -249,23 +241,24 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [gptService, onError, userContext, scrollToTop]);
+  }, [gptService, onError, userContext]);
 
   const handleRelatedQueryClick = useCallback((query: string) => {
-    // Scroll before handling the click
-    scrollToTop();
-    
     if (onRelatedQueryClick) {
       onRelatedQueryClick(query);
     }
     handleSearch(query);
-  }, [handleSearch, onRelatedQueryClick, scrollToTop]);
+  }, [handleSearch, onRelatedQueryClick]);
 
   useEffect(() => {
     if (initialQuery) {
       handleSearch(initialQuery);
     }
   }, [initialQuery, handleSearch]);
+
+  const toggleHistoryDisplay = () => {
+    setShowHistory(!showHistory);
+  };
 
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] flex flex-col" ref={containerRef}>
@@ -312,9 +305,53 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
           </div>
         </div>
       ) : (
-        <div ref={messagesContainerRef} className="relative flex flex-col w-full">
+        <div ref={messagesContainerRef} className="relative flex flex-col w-full overflow-y-auto">
+          <button
+            onClick={toggleHistoryDisplay}
+            className="w-full bg-gray-900/80 px-4 py-2 text-gray-200 hover:bg-gray-900/90 transition"
+          >
+            {showHistory ? "Hide History" : "Show History"}
+          </button>
+          {showHistory && (
+            <div className="overflow-auto max-h-96">
+              {chatHistory.map((conversation, index) => (
+                <div key={index} className="mb-6 px-4">
+                  <h3 className="text-sm font-bold text-gray-400 mb-2">Conversation {index + 1}</h3>
+                  {conversation.map((message, subIndex) => (
+                    <div key={subIndex} className="space-y-2">
+                      <div className="px-2 sm:px-4 w-full mx-auto">
+                        <div className="max-w-3xl mx-auto">
+                          {message.type === 'user' ? (
+                            <div className="w-full">
+                              <div className="flex-1 text-base sm:text-lg font-semibold text-gray-100">
+                                {message.content}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="w-full">
+                              <div className="flex-1 min-w-0">
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm, remarkMath]}
+                                  rehypePlugins={[rehypeKatex]}
+                                  components={MarkdownComponents}
+                                  className="whitespace-pre-wrap break-words space-y-1.5"
+                                >
+                                  {message.content || ''}
+                                </ReactMarkdown>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="space-y-2 pb-16">
-        {messages.map((message, index) => (
+            {messages.map((message, index) => (
               <div 
                 key={index} 
                 className="px-2 sm:px-4 w-full mx-auto"
@@ -323,7 +360,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                   {message.type === 'user' ? (
                     <div className="w-full">
                       <div className="flex-1 text-base sm:text-lg font-semibold text-gray-100">
-                      {message.content}
+                        {message.content}
                       </div>
                     </div>
                   ) : (
@@ -335,22 +372,14 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                             <span className="text-sm text-gray-400">Thinking...</span>
                           </div>
                         ) : (
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm, remarkMath]}
-                        rehypePlugins={[rehypeKatex]}
-                            components={{
-                              ...MarkdownComponents,
-                              p: ({ children }) => (
-                                <p className="text-sm sm:text-base text-gray-300 my-1.5 leading-relaxed 
-                                  break-words">
-                                  {children}
-                                </p>
-                              ),
-                            }}
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm, remarkMath]}
+                            rehypePlugins={[rehypeKatex]}
+                            components={MarkdownComponents}
                             className="whitespace-pre-wrap break-words space-y-1.5"
                           >
                             {message.content || ''}
-                      </ReactMarkdown>
+                          </ReactMarkdown>
                         )}
 
                         {message.topics && message.topics.length > 0 && (
@@ -376,11 +405,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                 </div>
               </div>
             ))}
-            <div 
-              ref={messagesEndRef}
-              className="h-8 w-full"
-              aria-hidden="true"
-            />
+            <div ref={messagesEndRef} className="h-8 w-full" aria-hidden="true" />
           </div>
 
           <div className="fixed bottom-12 left-0 right-0 bg-gradient-to-t from-background 
