@@ -1,5 +1,6 @@
 export interface UserContext {
   age: number;
+  messages?: Array<{ type: string; content?: string }>;
 }
 
 export interface MarkdownComponentProps {

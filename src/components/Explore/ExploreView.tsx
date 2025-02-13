@@ -1,4 +1,5 @@
 // src/components/Explore/ExploreView.tsx
+
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -207,32 +208,41 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
       if (window.navigator.vibrate) {
         window.navigator.vibrate(50);
       }
-
-      // Scroll before starting the search
-      setShowHistory(false);
-      
+  
       setIsLoading(true);
       setMessages(prevMessages => [
         ...prevMessages,
         { type: 'user', content: query },
         { type: 'ai', content: '' }
       ]);
-
+  
       setShowInitialSearch(false);
-
+  
       await gptService.streamExploreContent(
         query,
         userContext,
         (chunk: StreamChunk) => {
-          setMessages(prevMessages => [
-            ...prevMessages.slice(0, -1),
-            {
-              type: 'ai',
-              content: (prevMessages[prevMessages.length - 1].content || '') + (chunk.text || ''),
-              topics: chunk.topics,
-              questions: chunk.questions
+          setMessages(prevMessages => {
+            // Safely update only the last message
+            const lastMessage = prevMessages[prevMessages.length - 1];
+  
+            // Check if it's the AI's message currently being constructed
+            if (lastMessage.type === 'ai') {
+              const newText = chunk.text || '';
+              if (!(lastMessage.content || '').includes(newText)) {
+                return [
+                  ...prevMessages.slice(0, -1),
+                  {
+                    ...lastMessage,
+                    content: lastMessage.content + newText,
+                    topics: chunk.topics || lastMessage.topics,
+                    questions: chunk.questions || lastMessage.questions
+                  }
+                ];
+              }
             }
-          ]);
+            return prevMessages;
+          });
         }
       );
     } catch (error) {
@@ -242,12 +252,13 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
       setIsLoading(false);
     }
   }, [gptService, onError, userContext]);
+  
 
   const handleRelatedQueryClick = useCallback((query: string) => {
     if (onRelatedQueryClick) {
       onRelatedQueryClick(query);
     }
-    handleSearch(query);
+    handleSearch(query);  // Use the current messages as context
   }, [handleSearch, onRelatedQueryClick]);
 
   useEffect(() => {
@@ -316,7 +327,9 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             <div className="overflow-auto max-h-96">
               {chatHistory.map((conversation, index) => (
                 <div key={index} className="mb-6 px-4">
-                  <h3 className="text-sm font-bold text-gray-400 mb-2">Conversation {index + 1}</h3>
+                  <h3 className="text-sm font-bold text-gray-400 mb-2">
+                    Conversation {index + 1}
+                  </h3>
                   {conversation.map((message, subIndex) => (
                     <div key={subIndex} className="space-y-2">
                       <div className="px-2 sm:px-4 w-full mx-auto">
@@ -412,7 +425,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             via-background to-transparent pb-1 pt-2 z-50">
             <div className="w-full px-2 sm:px-4 max-w-3xl mx-auto">
               <SearchBar
-                onSearch={handleSearch} 
+                onSearch={query => handleSearch(query)} 
                 placeholder="Ask a follow-up question..."
                 centered={false}
                 className="bg-gray-900/80 backdrop-blur-lg border border-gray-700/50 h-10"
